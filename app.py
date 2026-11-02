@@ -1,11 +1,14 @@
+import os
 import sqlite3
 
-from flask import Flask, redirect, render_template, request, url_for
-from werkzeug.security import generate_password_hash
+from flask import Flask, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from database.db import get_db, init_db, seed_db
 
 app = Flask(__name__)
+# The fallback key is for local development only; set SECRET_KEY in production.
+app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
 
 with app.app_context():
     init_db()
@@ -28,6 +31,9 @@ def _valid_email(email):
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    if session.get("user_id"):
+        return redirect(url_for("profile"))
+
     if request.method == "GET":
         return render_template("register.html")
 
@@ -66,9 +72,54 @@ def register():
     return redirect(url_for("login", registered=1))
 
 
-@app.route("/login")
+@app.context_processor
+def inject_user():
+    user_id = session.get("user_id")
+    if not user_id:
+        return {"current_user_name": None}
+
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT name FROM users WHERE id = ?", (user_id,)).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        session.clear()
+        return {"current_user_name": None}
+    return {"current_user_name": row["name"]}
+
+
+@app.route("/login", methods=["GET", "POST"])
 def login():
-    return render_template("login.html")
+    if request.method == "GET":
+        if session.get("user_id"):
+            return redirect(url_for("profile"))
+        return render_template("login.html")
+
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+
+    def fail(message):
+        return render_template("login.html", error=message, email=email), 400
+
+    if not email or not password:
+        return fail("Email and password are required.")
+
+    conn = get_db()
+    try:
+        user = conn.execute(
+            "SELECT id, password_hash FROM users WHERE email = ?", (email,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if user is None or not check_password_hash(user["password_hash"], password):
+        return fail("Invalid email or password.")
+
+    session.clear()
+    session["user_id"] = user["id"]
+    return redirect(url_for("profile"))
 
 
 @app.route("/terms")
@@ -85,9 +136,10 @@ def privacy():
 # Placeholder routes — students will implement these                  #
 # ------------------------------------------------------------------ #
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
-    return "Logout — coming in Step 3"
+    session.clear()
+    return redirect(url_for("landing"))
 
 
 @app.route("/profile")
