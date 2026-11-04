@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}Profile — Spendly{% endblock %}
+
+{% block content %}
+
+<section class="profile-page">
+    <div class="profile-container">
+
+        <header class="profile-card profile-header">
+            <div class="profile-avatar" aria-hidden="true">{{ user.name[:1]|upper }}</div>
+            <div class="profile-identity">
+                <h1 class="profile-name">{{ user.name }}</h1>
+                <p class="profile-email">{{ user.email }}</p>
+            </div>
+            <span class="profile-pill">Member since {{ member_since }}</span>
+        </header>
+
+        <div class="profile-stats">
+            <div class="profile-card profile-stat">
+                <span class="profile-stat-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>
+                </span>
+                <p class="profile-stat-label">Total spent</p>
+                <p class="profile-stat-value">{{ total|inr }}</p>
+            </div>
+
+            <div class="profile-card profile-stat">
+                <span class="profile-stat-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
+                </span>
+                <p class="profile-stat-label">This month</p>
+                <p class="profile-stat-value">{{ month_total|inr }}</p>
+                <p class="profile-stat-note">{{ month_name }}</p>
+            </div>
+
+            <div class="profile-card profile-stat">
+                <span class="profile-stat-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg>
+                </span>
+                <p class="profile-stat-label">Expenses</p>
+                <p class="profile-stat-value">{{ count }}</p>
+            </div>
+
+            <div class="profile-card profile-stat">
+                <span class="profile-stat-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>
+                </span>
+                <p class="profile-stat-label">Top category</p>
+                <p class="profile-stat-value">{{ top_category or "—" }}</p>
+            </div>
+        </div>
+
+        <div class="profile-grid">
+            <section class="profile-card">
+                <h2 class="profile-card-title">Spending by category</h2>
+                {% if categories %}
+                <div class="profile-cats">
+                    {% for c in categories %}
+                    <div class="profile-cat-row">
+                        <div class="profile-cat-meta">
+                            <span class="profile-cat-name">{{ c.category }}</span>
+                            <span class="profile-cat-amount">{{ c.total|inr }}
+                                <span class="profile-cat-percent">{{ c.percent }}%</span>
+                            </span>
+                        </div>
+                        <div class="profile-cat-track">
+                            <div class="profile-cat-bar" style="width: {{ c.percent }}%"></div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="profile-empty">No spending to break down yet.</p>
+                {% endif %}
+            </section>
+
+            <section class="profile-card">
+                <h2 class="profile-card-title">Recent expenses</h2>
+                {% if recent %}
+                <div class="profile-table-wrap">
+                    <table class="profile-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Description</th>
+                                <th>Category</th>
+                                <th class="profile-num">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for e in recent %}
+                            <tr>
+                                <td class="profile-date">{{ e.date }}</td>
+                                <td>{{ e.description or "—" }}</td>
+                                <td><span class="profile-badge">{{ e.category }}</span></td>
+                                <td class="profile-num">{{ e.amount|inr }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="profile-empty">No expenses yet. Once you add some, they'll show up here.</p>
+                {% endif %}
+            </section>
+        </div>
+
+    </div>
+</section>
+
+{% endblock %}
