@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from datetime import date, datetime
 
 from flask import Flask, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -142,9 +143,78 @@ def logout():
     return redirect(url_for("landing"))
 
 
+@app.template_filter("inr")
+def inr(value):
+    return f"₹{value:,.2f}"
+
+
 @app.route("/profile")
 def profile():
-    return "Profile page — coming in Step 4"
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    this_month = date.today().strftime("%Y-%m")
+
+    conn = get_db()
+    try:
+        user = conn.execute(
+            "SELECT id, name, email, created_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        if user is None:
+            session.clear()
+            return redirect(url_for("login"))
+
+        summary = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total, "
+            "COUNT(*) AS count, "
+            "COALESCE(SUM(CASE WHEN substr(date, 1, 7) = ? THEN amount END), 0) "
+            "AS month_total "
+            "FROM expenses WHERE user_id = ?",
+            (this_month, user_id),
+        ).fetchone()
+
+        category_rows = conn.execute(
+            "SELECT category, SUM(amount) AS total FROM expenses "
+            "WHERE user_id = ? GROUP BY category ORDER BY total DESC, category",
+            (user_id,),
+        ).fetchall()
+
+        recent = conn.execute(
+            "SELECT date, description, category, amount FROM expenses "
+            "WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 10",
+            (user_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    overall = summary["total"]
+    categories = [
+        {
+            "category": row["category"],
+            "total": row["total"],
+            "percent": round(row["total"] / overall * 100, 1) if overall else 0,
+        }
+        for row in category_rows
+    ]
+
+    member_since = datetime.strptime(
+        user["created_at"], "%Y-%m-%d %H:%M:%S"
+    ).strftime("%B %Y")
+
+    return render_template(
+        "profile.html",
+        user=user,
+        member_since=member_since,
+        total=overall,
+        month_total=summary["month_total"],
+        count=summary["count"],
+        month_name=date.today().strftime("%B"),
+        top_category=categories[0]["category"] if categories else None,
+        categories=categories,
+        recent=recent,
+    )
 
 
 @app.route("/expenses/add")
