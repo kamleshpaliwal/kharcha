@@ -1,67 +1,54 @@
-# Spec: Profile Page Design
+# Spec: Profile Page
 
 ## Overview
-Replace the `/profile` placeholder string with a real, designed page. Step 03 already redirects every successful login to `/profile`, so today users land on the text "Profile page — coming in Step 4". This step builds the page they should see: an account header (name, email, member-since), a row of spending summary cards (total spent, this month, number of expenses, top category), a category breakdown, and a list of recent expenses. All data is read-only and comes from the existing `users` and `expenses` tables. Adding, editing and deleting expenses stay in Steps 7–9.
+This feature replaces the `/profile` stub with a fully designed profile page showing static, hardcoded data. The goal is to establish the complete UI layout — user info card, transaction history table, summary stats, and category breakdown — before any real database queries are wired up in Step 5. Building the UI first lets the team validate the design in isolation and ensures the templates are ready for the backend-connection step.
 
 ## Depends on
-- Step 01 — Database setup (`get_db()`, `users` and `expenses` tables, demo seed data)
-- Step 02 — Registration (real accounts)
-- Step 03 — Login and Logout (`session["user_id"]`, navbar with current user name, `POST /logout`)
+- Step 1: Database setup (schema must exist)
+- Step 2: Registration (user accounts must be creatable)
+- Step 3: Login + Logout (session must be set; `/profile` must be a protected route)
 
 ## Routes
-- `GET /profile` — render the profile page for the logged-in user; if there is no `user_id` in the session, redirect to `/login` — logged-in
-
-(The existing `profile` route function name must not change: `login`, `register` and `base.html` use `url_for('profile')`.)
+- GET /profile — render the profile page — logged-in only (redirect to /login if not authenticated)
 
 ## Database changes
-No database changes. Read-only queries against existing columns: `users(id, name, email, created_at)` and `expenses(user_id, amount, category, date, description)`.
+No database changes. The existing `users` and `expenses` tables are sufficient.
 
 ## Templates
-- **Create:**
-  - `templates/profile.html` — extends `base.html`; sections: profile header, summary cards, category breakdown, recent expenses (with an empty state for users who have no expenses)
-- **Modify:** none (`base.html` navbar already links to `profile`)
+- Create: `templates/profile.html` — full profile page extending `base.html`; contains four sections:
+  1. **User info card** — avatar initials, name, email, member-since date (all hardcoded)
+  2. **Summary stats row** — total spent, number of transactions, top category (hardcoded)
+  3. **Transaction history table** — list of recent expenses with date, description, category badge, amount (hardcoded rows)
+  4. **Category breakdown** — per-category totals displayed as a simple list or progress-bar rows (hardcoded)
 
 ## Files to change
-- `app.py` — implement the `profile` route (session check, queries, `render_template`)
-- `static/css/style.css` — add profile page styles (header/avatar, stat cards, category bars, expense list, responsive layout), using existing CSS variables
+- `app.py` — replace the `/profile` stub with a real view function that:
+  - Redirects unauthenticated users to `/login`
+  - Passes hardcoded context variables to `profile.html`
 
 ## Files to create
 - `templates/profile.html`
-- `tests/test_profile.py` — pytest tests for the profile route
 
 ## New dependencies
 No new dependencies.
 
 ## Rules for implementation
-- No SQLAlchemy or ORMs
-- Parameterised queries only; every query filters by the session's `user_id`, so a user can never see another user's data
-- Passwords hashed with werkzeug — never select or render `password_hash`
-- Use CSS variables — never hardcode hex values (reuse `--accent`, `--paper-card`, `--border`, `--radius-md`, `--font-display`, etc. from `style.css`; add new variables to `:root` only if truly needed)
+- No SQLAlchemy or ORMs — use raw sqlite3 via `get_db()` if any DB call is ever needed
+- Parameterised queries only — never string-format SQL
+- Passwords hashed with werkzeug (no changes to auth in this step)
+- Use CSS variables — never hardcode hex values
 - All templates extend `base.html`
-- Not logged in → `redirect(url_for("login"))`. If the session has a `user_id` for a user that no longer exists, clear the session and redirect to login
-- Always close the DB connection (`try/finally`)
-- Do the aggregation in SQL (`SUM`, `COUNT`, `GROUP BY category`), not by looping over every row in Python
-- Page contents:
-  - Header: initial-letter avatar, name, email, "Member since <Month YYYY>" from `created_at`
-  - Summary cards: total spent, spent this calendar month, number of expenses, top category (show "—" when there are no expenses)
-  - Category breakdown: each category with its total and percentage of overall spend, sorted highest first, shown as a horizontal bar whose width is the percentage (inline `style="width: N%"` is allowed for the dynamic width only)
-  - Recent expenses: the latest 10 by `date DESC, id DESC` showing date, description, category and amount
-  - Amounts use the rupee sign and two decimals (e.g. `₹1,800.00`), matching the "Track every rupee" branding
-- Autoescape stays on; never use `|safe` on user-provided text such as descriptions
-- Layout must work on mobile widths (cards stack to one column, no horizontal scroll)
-- No add/edit/delete buttons or links, no filters, no charts library, no JavaScript — those belong to later steps
-- Do not touch the other placeholder routes or `seed_db()`
+- No inline styles
+- Authentication guard: check `session.get("user_id")`; if absent, `redirect(url_for("login"))`
+- All data passed to the template must be hardcoded Python dicts/lists in `app.py` — no DB queries in this step
+- Category badges must use a CSS class, not inline colour styles
 
 ## Definition of done
-- [ ] Visiting `/profile` while logged out redirects to `/login`
-- [ ] Logging in as `demo@spendly.com` / `demo123` lands on a designed profile page, not a placeholder string
-- [ ] The header shows the demo user's name, email and "Member since" month and year
-- [ ] Summary cards show the correct total spent (₹6,110.00 for the seed data), this-month total, expense count (8) and top category (Shopping)
-- [ ] The category breakdown lists every category with its total and percentage, highest first, and the percentages add up to about 100%
-- [ ] The recent expenses list shows the latest 10 expenses newest first, with date, description, category and amount
-- [ ] A freshly registered user with no expenses sees zeros, "—" for top category and an empty-state message, with no errors
-- [ ] A user only ever sees their own expenses (verified with two accounts)
-- [ ] An expense description containing `<script>` is displayed as text, not executed
-- [ ] The page is readable at a ~375px wide viewport with no horizontal scrolling
-- [ ] The navbar still shows the user's name and "Sign out", and signing out still works from this page
-- [ ] The app starts without errors and `pytest` passes
+- [ ] Visiting `/profile` without being logged in redirects to `/login`
+- [ ] Visiting `/profile` while logged in returns HTTP 200
+- [ ] The page displays a user info card with a name and email
+- [ ] The page displays at least three summary stat values (e.g. total spent, transaction count, top category)
+- [ ] The page displays a transaction history table with at least three hardcoded rows
+- [ ] The page displays a category breakdown section with at least three categories
+- [ ] The navbar shows the logged-in state (username + logout link)
+- [ ] No hex colour values appear in `profile.html` — only CSS variables
