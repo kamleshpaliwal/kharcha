@@ -19,11 +19,7 @@
         <section class="profile-card profile-filter">
             <div class="profile-filter-presets">
                 {% for p in presets %}
-                {% if p.date_from %}
                 <a class="profile-filter-btn{% if p.active %} is-active{% endif %}" href="{{ url_for('profile', date_from=p.date_from, date_to=p.date_to) }}">{{ p.label }}</a>
-                {% else %}
-                <a class="profile-filter-btn{% if p.active %} is-active{% endif %}" href="{{ url_for('profile') }}">{{ p.label }}</a>
-                {% endif %}
                 {% endfor %}
             </div>
             <form class="profile-filter-form" method="get" action="{{ url_for('profile') }}">

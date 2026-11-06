@@ -1,6 +1,6 @@
+import calendar
 import os
 import sqlite3
-import calendar
 from datetime import date, datetime
 
 from flask import Flask, redirect, render_template, request, session, url_for
@@ -149,21 +149,23 @@ def inr(value):
     return f"₹{value:,.2f}"
 
 
-# ---- DATE FILTER ---------------------------------------------------- #
 def _date_clause(date_from, date_to):
-    """Return (sql_fragment, params) restricting expenses.date to a range."""
+    """Return (sql_fragment, params) restricting expenses.date to a range.
+
+    The fragment must stay a hardcoded literal: dates go in via placeholders,
+    and nothing user-supplied may ever be concatenated into the SQL text.
+    """
     if date_from and date_to:
         return " AND date BETWEEN ? AND ?", (date_from, date_to)
     return "", ()
 
 
 def _parse_date(value):
-    """Return value if it is a valid YYYY-MM-DD string, else None."""
+    """Return value as a zero-padded YYYY-MM-DD string, or None if invalid."""
     try:
-        datetime.strptime(value, "%Y-%m-%d")
+        return datetime.strptime(value, "%Y-%m-%d").date().isoformat()
     except (TypeError, ValueError):
         return None
-    return value
 
 
 def _parse_date_range(args):
@@ -190,27 +192,35 @@ def _months_ago(today, months):
     return date(year, month, day)
 
 
-def _build_presets(today):
-    """Return the quick-select filter presets, computed relative to today."""
+def _build_presets(today, date_from=None, date_to=None):
+    """Return the quick-select filter presets, relative to today.
+
+    Each preset carries an `active` flag marking whether it matches the
+    currently applied range.
+    """
     end = today.isoformat()
-    return [
-        {"label": "This Month", "date_from": today.replace(day=1).isoformat(),
-         "date_to": end},
-        {"label": "Last 3 Months", "date_from": _months_ago(today, 3).isoformat(),
-         "date_to": end},
-        {"label": "Last 6 Months", "date_from": _months_ago(today, 6).isoformat(),
-         "date_to": end},
-        {"label": "All Time", "date_from": None, "date_to": None},
+    ranges = [
+        ("This Month", today.replace(day=1).isoformat(), end),
+        ("Last 3 Months", _months_ago(today, 3).isoformat(), end),
+        ("Last 6 Months", _months_ago(today, 6).isoformat(), end),
+        ("All Time", None, None),
     ]
-# ---- END DATE FILTER ------------------------------------------------ #
+    return [
+        {
+            "label": label,
+            "date_from": start,
+            "date_to": stop,
+            "active": (start, stop) == (date_from, date_to),
+        }
+        for label, start, stop in ranges
+    ]
 
 
-# ---- SUMMARY STATS (owned by subagent 2) --------------------------- #
 def _get_summary(conn, user_id, date_from=None, date_to=None):
     """Return a dict with total, count and month_total for the user.
 
-    total and count honour the date range; month_total is always the
-    current calendar month.
+    total and count honour the date range; month_total is intentionally
+    independent of the filter and is always the current calendar month.
     """
     clause, extra = _date_clause(date_from, date_to)
     this_month = date.today().strftime("%Y-%m")
@@ -229,11 +239,11 @@ def _get_summary(conn, user_id, date_from=None, date_to=None):
         "count": row["count"],
         "month_total": month_total,
     }
-# ---- END SUMMARY STATS --------------------------------------------- #
 
 
-# ---- CATEGORY BREAKDOWN (owned by subagent 3) ---------------------- #
-def _get_category_breakdown(conn, user_id, overall, date_from=None, date_to=None):
+def _get_category_breakdown(
+    conn, user_id, overall, date_from=None, date_to=None
+):
     """Return a list of {category, total, percent}, highest total first."""
     clause, extra = _date_clause(date_from, date_to)
     rows = conn.execute(
@@ -250,10 +260,8 @@ def _get_category_breakdown(conn, user_id, overall, date_from=None, date_to=None
         }
         for row in rows
     ]
-# ---- END CATEGORY BREAKDOWN ---------------------------------------- #
 
 
-# ---- TRANSACTION HISTORY (owned by subagent 1) --------------------- #
 def _get_recent_expenses(conn, user_id, limit=10, date_from=None, date_to=None):
     """Return the user's most recent expenses, newest first."""
     clause, extra = _date_clause(date_from, date_to)
@@ -262,7 +270,6 @@ def _get_recent_expenses(conn, user_id, limit=10, date_from=None, date_to=None):
         "WHERE user_id = ?" + clause + " ORDER BY date DESC, id DESC LIMIT ?",
         (user_id,) + extra + (limit,),
     ).fetchall()
-# ---- END TRANSACTION HISTORY --------------------------------------- #
 
 
 @app.route("/profile")
@@ -297,11 +304,7 @@ def profile():
         user["created_at"], "%Y-%m-%d %H:%M:%S"
     ).strftime("%B %Y")
 
-    presets = _build_presets(date.today())
-    for preset in presets:
-        preset["active"] = (
-            preset["date_from"] == date_from and preset["date_to"] == date_to
-        )
+    presets = _build_presets(date.today(), date_from, date_to)
 
     return render_template(
         "profile.html",
