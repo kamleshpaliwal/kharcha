@@ -1,3 +1,4 @@
+import calendar
 import os
 import sqlite3
 from datetime import date, datetime
@@ -148,33 +149,108 @@ def inr(value):
     return f"₹{value:,.2f}"
 
 
-# ---- SUMMARY STATS (owned by subagent 2) --------------------------- #
-def _get_summary(conn, user_id):
-    """Return a dict with total, count and month_total for the user."""
+def _date_clause(date_from, date_to):
+    """Return (sql_fragment, params) restricting expenses.date to a range.
+
+    The fragment must stay a hardcoded literal: dates go in via placeholders,
+    and nothing user-supplied may ever be concatenated into the SQL text.
+    """
+    if date_from and date_to:
+        return " AND date BETWEEN ? AND ?", (date_from, date_to)
+    return "", ()
+
+
+def _parse_date(value):
+    """Return value as a zero-padded YYYY-MM-DD string, or None if invalid."""
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date().isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_date_range(args):
+    """Return (date_from, date_to, error) from request args.
+
+    Missing or malformed values mean no filter. A reversed range also means
+    no filter, plus an error message for the user.
+    """
+    date_from = _parse_date(args.get("date_from", "").strip())
+    date_to = _parse_date(args.get("date_to", "").strip())
+    if not date_from or not date_to:
+        return None, None, None
+    if date_from > date_to:
+        return None, None, "Start date must be before end date."
+    return date_from, date_to, None
+
+
+def _months_ago(today, months):
+    """Return the date `months` calendar months before today (day clamped)."""
+    index = today.year * 12 + today.month - 1 - months
+    year, month = divmod(index, 12)
+    month += 1
+    day = min(today.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def _build_presets(today, date_from=None, date_to=None):
+    """Return the quick-select filter presets, relative to today.
+
+    Each preset carries an `active` flag marking whether it matches the
+    currently applied range.
+    """
+    end = today.isoformat()
+    ranges = [
+        ("This Month", today.replace(day=1).isoformat(), end),
+        ("Last 3 Months", _months_ago(today, 3).isoformat(), end),
+        ("Last 6 Months", _months_ago(today, 6).isoformat(), end),
+        ("All Time", None, None),
+    ]
+    return [
+        {
+            "label": label,
+            "date_from": start,
+            "date_to": stop,
+            "active": (start, stop) == (date_from, date_to),
+        }
+        for label, start, stop in ranges
+    ]
+
+
+def _get_summary(conn, user_id, date_from=None, date_to=None):
+    """Return a dict with total, count and month_total for the user.
+
+    total and count honour the date range; month_total is intentionally
+    independent of the filter and is always the current calendar month.
+    """
+    clause, extra = _date_clause(date_from, date_to)
     this_month = date.today().strftime("%Y-%m")
     row = conn.execute(
-        "SELECT COALESCE(SUM(amount), 0) AS total, "
-        "COUNT(*) AS count, "
-        "COALESCE(SUM(CASE WHEN substr(date, 1, 7) = ? THEN amount END), 0) "
-        "AS month_total "
-        "FROM expenses WHERE user_id = ?",
-        (this_month, user_id),
+        "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count "
+        "FROM expenses WHERE user_id = ?" + clause,
+        (user_id,) + extra,
     ).fetchone()
+    month_total = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM expenses "
+        "WHERE user_id = ? AND substr(date, 1, 7) = ?",
+        (user_id, this_month),
+    ).fetchone()[0]
     return {
         "total": row["total"],
         "count": row["count"],
-        "month_total": row["month_total"],
+        "month_total": month_total,
     }
-# ---- END SUMMARY STATS --------------------------------------------- #
 
 
-# ---- CATEGORY BREAKDOWN (owned by subagent 3) ---------------------- #
-def _get_category_breakdown(conn, user_id, overall):
+def _get_category_breakdown(
+    conn, user_id, overall, date_from=None, date_to=None
+):
     """Return a list of {category, total, percent}, highest total first."""
+    clause, extra = _date_clause(date_from, date_to)
     rows = conn.execute(
         "SELECT category, SUM(amount) AS total FROM expenses "
-        "WHERE user_id = ? GROUP BY category ORDER BY total DESC, category",
-        (user_id,),
+        "WHERE user_id = ?" + clause +
+        " GROUP BY category ORDER BY total DESC, category",
+        (user_id,) + extra,
     ).fetchall()
     return [
         {
@@ -184,18 +260,16 @@ def _get_category_breakdown(conn, user_id, overall):
         }
         for row in rows
     ]
-# ---- END CATEGORY BREAKDOWN ---------------------------------------- #
 
 
-# ---- TRANSACTION HISTORY (owned by subagent 1) --------------------- #
-def _get_recent_expenses(conn, user_id, limit=10):
+def _get_recent_expenses(conn, user_id, limit=10, date_from=None, date_to=None):
     """Return the user's most recent expenses, newest first."""
+    clause, extra = _date_clause(date_from, date_to)
     return conn.execute(
         "SELECT date, description, category, amount FROM expenses "
-        "WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT ?",
-        (user_id, limit),
+        "WHERE user_id = ?" + clause + " ORDER BY date DESC, id DESC LIMIT ?",
+        (user_id,) + extra + (limit,),
     ).fetchall()
-# ---- END TRANSACTION HISTORY --------------------------------------- #
 
 
 @app.route("/profile")
@@ -203,6 +277,8 @@ def profile():
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login"))
+
+    date_from, date_to, filter_error = _parse_date_range(request.args)
 
     conn = get_db()
     try:
@@ -214,9 +290,13 @@ def profile():
             session.clear()
             return redirect(url_for("login"))
 
-        summary = _get_summary(conn, user_id)
-        categories = _get_category_breakdown(conn, user_id, summary["total"])
-        recent = _get_recent_expenses(conn, user_id)
+        summary = _get_summary(conn, user_id, date_from, date_to)
+        categories = _get_category_breakdown(
+            conn, user_id, summary["total"], date_from, date_to
+        )
+        recent = _get_recent_expenses(
+            conn, user_id, date_from=date_from, date_to=date_to
+        )
     finally:
         conn.close()
 
@@ -224,8 +304,14 @@ def profile():
         user["created_at"], "%Y-%m-%d %H:%M:%S"
     ).strftime("%B %Y")
 
+    presets = _build_presets(date.today(), date_from, date_to)
+
     return render_template(
         "profile.html",
+        presets=presets,
+        date_from=date_from,
+        date_to=date_to,
+        filter_error=filter_error,
         user=user,
         member_since=member_since,
         total=summary["total"],
