@@ -157,3 +157,138 @@ def test_navbar_still_has_sign_out(client):
     make_user()
     login(client)
     assert "Sign out" in get_profile(client)
+
+
+# ------------------------------------------------------------------ #
+# Date filter (Step 6)                                                #
+# ------------------------------------------------------------------ #
+
+def filter_url(date_from, date_to):
+    return f"/profile?date_from={date_from}&date_to={date_to}"
+
+
+def seed_dated(uid):
+    add_expense(uid, 100, "Food", "2026-01-10", "jan-early")
+    add_expense(uid, 200, "Travel", "2026-01-20", "jan-late")
+    add_expense(uid, 400, "Food", "2026-02-15", "feb-item")
+
+
+def test_filter_absent_returns_all(client):
+    uid = make_user()
+    seed_dated(uid)
+    login(client)
+    html = get_profile(client)
+    assert "₹700.00" in html
+    assert "jan-early" in html and "feb-item" in html
+
+
+def test_filter_applies_to_all_sections(client):
+    uid = make_user()
+    seed_dated(uid)
+    login(client)
+    resp = client.get(filter_url("2026-01-01", "2026-01-31"))
+    html = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert "₹300.00" in html
+    assert "jan-early" in html and "feb-item" not in html
+    assert "66.7%" in html and "33.3%" in html  # Travel / Food of 300
+
+
+def test_filter_bounds_are_inclusive(client):
+    uid = make_user()
+    seed_dated(uid)
+    login(client)
+    html = client.get(filter_url("2026-01-10", "2026-01-20")).get_data(as_text=True)
+    assert "jan-early" in html and "jan-late" in html
+    assert "₹300.00" in html
+
+
+def test_filter_empty_range_shows_empty_state(client):
+    uid = make_user()
+    seed_dated(uid)
+    login(client)
+    html = client.get(filter_url("2020-01-01", "2020-01-31")).get_data(as_text=True)
+    assert "₹0.00" in html
+    assert "No expenses in this date range." in html
+
+
+def test_filter_reversed_range_shows_error_and_all_data(client):
+    uid = make_user()
+    seed_dated(uid)
+    login(client)
+    html = client.get(filter_url("2026-02-01", "2026-01-01")).get_data(as_text=True)
+    assert "Start date must be before end date." in html
+    assert "₹700.00" in html
+
+
+def test_filter_malformed_dates_fall_back(client):
+    uid = make_user()
+    seed_dated(uid)
+    login(client)
+    for query in (
+        "date_from=not-a-date&date_to=2026-01-31",
+        "date_from=' OR 1=1 --&date_to=2026-01-31",
+        "date_from=2026-01-01",
+    ):
+        resp = client.get("/profile?" + query)
+        assert resp.status_code == 200
+        assert "₹700.00" in resp.get_data(as_text=True)
+
+
+def test_filter_inputs_prefilled_and_active_preset(client):
+    uid = make_user()
+    seed_dated(uid)
+    login(client)
+    html = client.get(filter_url("2026-01-01", "2026-01-31")).get_data(as_text=True)
+    assert 'value="2026-01-01"' in html and 'value="2026-01-31"' in html
+    assert "is-active" not in html  # custom range matches no preset
+
+
+def test_filter_all_time_preset_active_by_default(client):
+    make_user()
+    login(client)
+    html = get_profile(client)
+    assert 'is-active" href="/profile">All Time' in html
+
+
+def test_filter_this_month_preset(client):
+    uid = make_user()
+    add_expense(uid, 50, "Food", description="now-item")
+    add_expense(uid, 70, "Food", long_ago(), "old-item")
+    login(client)
+    today = date.today()
+    start = today.replace(day=1).isoformat()
+    html = client.get(filter_url(start, today.isoformat())).get_data(as_text=True)
+    assert "now-item" in html and "old-item" not in html
+    assert 'is-active" href="/profile?date_from=' in html
+
+
+def test_filter_month_total_ignores_filter(client):
+    uid = make_user()
+    add_expense(uid, 50, "Food", description="now-item")
+    login(client)
+    html = client.get(filter_url("2020-01-01", "2020-01-31")).get_data(as_text=True)
+    assert 'profile-stat-value">₹50.00<' in html
+
+
+def test_filter_never_leaks_other_users(client):
+    a = make_user()
+    b = make_user(email="other@example.com", name="Other Person")
+    add_expense(a, 10, "Food", "2026-01-10", "mine-only")
+    add_expense(b, 999, "Travel", "2026-01-10", "theirs-only")
+    login(client)
+    html = client.get(filter_url("2026-01-01", "2026-01-31")).get_data(as_text=True)
+    assert "mine-only" in html and "theirs-only" not in html
+
+
+def test_filter_logged_out_redirects(client):
+    resp = client.get(filter_url("2026-01-01", "2026-01-31"))
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+
+
+def test_months_ago_clamps_day():
+    from app import _months_ago
+
+    assert _months_ago(date(2026, 5, 31), 3) == date(2026, 2, 28)
+    assert _months_ago(date(2026, 1, 15), 3) == date(2025, 10, 15)

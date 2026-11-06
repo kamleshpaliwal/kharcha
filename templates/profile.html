@@ -16,6 +16,32 @@
             <span class="profile-pill">Member since {{ member_since }}</span>
         </header>
 
+        <section class="profile-card profile-filter">
+            <div class="profile-filter-presets">
+                {% for p in presets %}
+                {% if p.date_from %}
+                <a class="profile-filter-btn{% if p.active %} is-active{% endif %}" href="{{ url_for('profile', date_from=p.date_from, date_to=p.date_to) }}">{{ p.label }}</a>
+                {% else %}
+                <a class="profile-filter-btn{% if p.active %} is-active{% endif %}" href="{{ url_for('profile') }}">{{ p.label }}</a>
+                {% endif %}
+                {% endfor %}
+            </div>
+            <form class="profile-filter-form" method="get" action="{{ url_for('profile') }}">
+                <label class="profile-filter-field">
+                    <span>From</span>
+                    <input type="date" name="date_from" value="{{ date_from or '' }}" required>
+                </label>
+                <label class="profile-filter-field">
+                    <span>To</span>
+                    <input type="date" name="date_to" value="{{ date_to or '' }}" required>
+                </label>
+                <button type="submit" class="profile-filter-apply">Apply</button>
+            </form>
+            {% if filter_error %}
+            <p class="profile-filter-error" role="alert">{{ filter_error }}</p>
+            {% endif %}
+        </section>
+
         <div class="profile-stats">
             <div class="profile-card profile-stat">
                 <span class="profile-stat-icon">
@@ -101,7 +127,11 @@
                     </table>
                 </div>
                 {% else %}
+                {% if date_from %}
+                <p class="profile-empty">No expenses in this date range.</p>
+                {% else %}
                 <p class="profile-empty">No expenses yet. Once you add some, they'll show up here.</p>
+                {% endif %}
                 {% endif %}
             </section>
         </div>

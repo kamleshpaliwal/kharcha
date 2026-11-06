@@ -726,6 +726,83 @@ a { color: inherit; text-decoration: none; }
     border-radius: 999px;
 }
 
+.profile-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem 1.5rem;
+}
+
+.profile-filter-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.profile-filter-btn {
+    background: var(--paper-warm);
+    color: var(--ink-soft);
+    font-size: 0.85rem;
+    padding: 0.5rem 1rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    text-decoration: none;
+}
+
+.profile-filter-btn:hover { border-color: var(--accent); }
+
+.profile-filter-btn.is-active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--paper-card);
+}
+
+.profile-filter-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+}
+
+.profile-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.8rem;
+    color: var(--ink-muted);
+}
+
+.profile-filter-field input {
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    color: var(--ink);
+    background: var(--paper-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.6rem;
+}
+
+.profile-filter-apply {
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    background: var(--accent);
+    color: var(--paper-card);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 1.25rem;
+    cursor: pointer;
+}
+
+.profile-filter-error {
+    flex-basis: 100%;
+    background: var(--danger-light);
+    color: var(--danger);
+    font-size: 0.85rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-sm);
+}
+
 .profile-stats {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -921,6 +998,8 @@ a { color: inherit; text-decoration: none; }
     .dash-stats { grid-template-columns: 1fr; }
     .profile-page { padding: 1rem 1rem 2rem; }
     .profile-stats { grid-template-columns: 1fr; }
+    .profile-filter,
+    .profile-filter-form { flex-direction: column; align-items: stretch; }
     .profile-header {
         flex-direction: column;
         text-align: center;
