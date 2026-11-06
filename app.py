@@ -148,13 +148,61 @@ def inr(value):
     return f"₹{value:,.2f}"
 
 
+# ---- SUMMARY STATS (owned by subagent 2) --------------------------- #
+def _get_summary(conn, user_id):
+    """Return a dict with total, count and month_total for the user."""
+    this_month = date.today().strftime("%Y-%m")
+    row = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) AS total, "
+        "COUNT(*) AS count, "
+        "COALESCE(SUM(CASE WHEN substr(date, 1, 7) = ? THEN amount END), 0) "
+        "AS month_total "
+        "FROM expenses WHERE user_id = ?",
+        (this_month, user_id),
+    ).fetchone()
+    return {
+        "total": row["total"],
+        "count": row["count"],
+        "month_total": row["month_total"],
+    }
+# ---- END SUMMARY STATS --------------------------------------------- #
+
+
+# ---- CATEGORY BREAKDOWN (owned by subagent 3) ---------------------- #
+def _get_category_breakdown(conn, user_id, overall):
+    """Return a list of {category, total, percent}, highest total first."""
+    rows = conn.execute(
+        "SELECT category, SUM(amount) AS total FROM expenses "
+        "WHERE user_id = ? GROUP BY category ORDER BY total DESC, category",
+        (user_id,),
+    ).fetchall()
+    return [
+        {
+            "category": row["category"],
+            "total": row["total"],
+            "percent": round(row["total"] / overall * 100, 1) if overall else 0,
+        }
+        for row in rows
+    ]
+# ---- END CATEGORY BREAKDOWN ---------------------------------------- #
+
+
+# ---- TRANSACTION HISTORY (owned by subagent 1) --------------------- #
+def _get_recent_expenses(conn, user_id, limit=10):
+    """Return the user's most recent expenses, newest first."""
+    return conn.execute(
+        "SELECT date, description, category, amount FROM expenses "
+        "WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+# ---- END TRANSACTION HISTORY --------------------------------------- #
+
+
 @app.route("/profile")
 def profile():
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login"))
-
-    this_month = date.today().strftime("%Y-%m")
 
     conn = get_db()
     try:
@@ -166,38 +214,11 @@ def profile():
             session.clear()
             return redirect(url_for("login"))
 
-        summary = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) AS total, "
-            "COUNT(*) AS count, "
-            "COALESCE(SUM(CASE WHEN substr(date, 1, 7) = ? THEN amount END), 0) "
-            "AS month_total "
-            "FROM expenses WHERE user_id = ?",
-            (this_month, user_id),
-        ).fetchone()
-
-        category_rows = conn.execute(
-            "SELECT category, SUM(amount) AS total FROM expenses "
-            "WHERE user_id = ? GROUP BY category ORDER BY total DESC, category",
-            (user_id,),
-        ).fetchall()
-
-        recent = conn.execute(
-            "SELECT date, description, category, amount FROM expenses "
-            "WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 10",
-            (user_id,),
-        ).fetchall()
+        summary = _get_summary(conn, user_id)
+        categories = _get_category_breakdown(conn, user_id, summary["total"])
+        recent = _get_recent_expenses(conn, user_id)
     finally:
         conn.close()
-
-    overall = summary["total"]
-    categories = [
-        {
-            "category": row["category"],
-            "total": row["total"],
-            "percent": round(row["total"] / overall * 100, 1) if overall else 0,
-        }
-        for row in category_rows
-    ]
 
     member_since = datetime.strptime(
         user["created_at"], "%Y-%m-%d %H:%M:%S"
@@ -207,7 +228,7 @@ def profile():
         "profile.html",
         user=user,
         member_since=member_since,
-        total=overall,
+        total=summary["total"],
         month_total=summary["month_total"],
         count=summary["count"],
         month_name=date.today().strftime("%B"),
