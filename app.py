@@ -1,4 +1,5 @@
 import calendar
+import math
 import os
 import sqlite3
 from datetime import date, datetime
@@ -11,6 +12,19 @@ from database.db import get_db, init_db, seed_db
 app = Flask(__name__)
 # The fallback key is for local development only; set SECRET_KEY in production.
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
+
+# Add-expense validation limits and choices
+CATEGORIES = [
+    "Food",
+    "Transport",
+    "Bills",
+    "Health",
+    "Entertainment",
+    "Shopping",
+    "Other",
+]
+MAX_AMOUNT = 1_000_000_000
+MAX_DESCRIPTION = 200
 
 with app.app_context():
     init_db()
@@ -324,9 +338,102 @@ def profile():
     )
 
 
-@app.route("/expenses/add")
+@app.route("/analytics")
+def analytics():
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+    return render_template("analytics.html")
+
+
+def _validate_expense_form(form):
+    """Validate the add/edit expense form.
+
+    Returns (clean, error). `clean` is a dict ready for the database when the
+    form is valid, otherwise None; `error` is a user-facing message or None.
+    """
+    amount_raw = form.get("amount", "").strip()
+    category = form.get("category", "")
+    date_raw = form.get("date", "").strip()
+    description = form.get("description", "").strip()
+
+    try:
+        amount = round(float(amount_raw), 2)
+    except ValueError:
+        return None, "Please enter a valid amount."
+    if not math.isfinite(amount) or amount <= 0:
+        return None, "Amount must be greater than zero."
+    if amount > MAX_AMOUNT:
+        return None, "Amount is too large."
+    if category not in CATEGORIES:
+        return None, "Please choose a valid category."
+    parsed_date = _parse_date(date_raw)
+    if parsed_date is None:
+        return None, "Please enter a valid date."
+    if len(description) > MAX_DESCRIPTION:
+        return None, f"Description must be {MAX_DESCRIPTION} characters or fewer."
+
+    return {
+        "amount": amount,
+        "category": category,
+        "date": parsed_date,
+        "description": description or None,
+    }, None
+
+
+def _render_expense_form(status=200, **context):
+    return (
+        render_template(
+            "add_expense.html",
+            categories=CATEGORIES,
+            max_description=MAX_DESCRIPTION,
+            **context,
+        ),
+        status,
+    )
+
+
+@app.route("/expenses/add", methods=["GET", "POST"])
 def add_expense():
-    return "Add expense — coming in Step 7"
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    if request.method == "GET":
+        return _render_expense_form(date_raw=date.today().isoformat())
+
+    clean, error = _validate_expense_form(request.form)
+    if error:
+        return _render_expense_form(
+            400,
+            error=error,
+            amount_raw=request.form.get("amount", "").strip(),
+            category=request.form.get("category", ""),
+            date_raw=request.form.get("date", "").strip(),
+            description=request.form.get("description", "").strip(),
+        )
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO expenses (user_id, amount, category, date, description) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                user_id,
+                clean["amount"],
+                clean["category"],
+                clean["date"],
+                clean["description"],
+            ),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        # The user row no longer exists (e.g. deleted); the session is stale.
+        session.clear()
+        return redirect(url_for("login"))
+    finally:
+        conn.close()
+
+    return redirect(url_for("profile"))
 
 
 @app.route("/expenses/<int:id>/edit")

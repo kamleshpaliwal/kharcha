@@ -14,6 +14,7 @@
                 <p class="profile-email">{{ user.email }}</p>
             </div>
             <span class="profile-pill">Member since {{ member_since }}</span>
+            <a class="btn-primary" href="{{ url_for('add_expense') }}">Add expense</a>
         </header>
 
         <section class="profile-card profile-filter">
@@ -126,7 +127,7 @@
                 {% if date_from %}
                 <p class="profile-empty">No expenses in this date range.</p>
                 {% else %}
-                <p class="profile-empty">No expenses yet. Once you add some, they'll show up here.</p>
+                <p class="profile-empty">No expenses yet. <a href="{{ url_for('add_expense') }}">Add your first expense</a> and it'll show up here.</p>
                 {% endif %}
                 {% endif %}
             </section>
