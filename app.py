@@ -4,7 +4,15 @@ import os
 import sqlite3
 from datetime import date, datetime
 
-from flask import Flask, redirect, render_template, request, session, url_for
+from flask import (
+    Flask,
+    abort,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from database.db import get_db, init_db, seed_db
@@ -12,8 +20,11 @@ from database.db import get_db, init_db, seed_db
 app = Flask(__name__)
 # The fallback key is for local development only; set SECRET_KEY in production.
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
+# SameSite=Lax stops browsers sending the session cookie on cross-site POSTs,
+# which blocks the simplest CSRF attacks against the form routes.
+app.config.update(SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_HTTPONLY=True)
 
-# Add-expense validation limits and choices
+# Expense form (add and edit) validation limits and choices
 CATEGORIES = [
     "Food",
     "Transport",
@@ -149,7 +160,7 @@ def privacy():
 
 
 # ------------------------------------------------------------------ #
-# Placeholder routes — students will implement these                  #
+# Session, profile and expense routes                                 #
 # ------------------------------------------------------------------ #
 
 @app.route("/logout", methods=["POST"])
@@ -280,7 +291,7 @@ def _get_recent_expenses(conn, user_id, limit=10, date_from=None, date_to=None):
     """Return the user's most recent expenses, newest first."""
     clause, extra = _date_clause(date_from, date_to)
     return conn.execute(
-        "SELECT date, description, category, amount FROM expenses "
+        "SELECT id, date, description, category, amount FROM expenses "
         "WHERE user_id = ?" + clause + " ORDER BY date DESC, id DESC LIMIT ?",
         (user_id,) + extra + (limit,),
     ).fetchall()
@@ -381,6 +392,10 @@ def _validate_expense_form(form):
 
 
 def _render_expense_form(status=200, **context):
+    context.setdefault("form_title", "Add expense")
+    context.setdefault("form_subtitle", "Record a new expense")
+    context.setdefault("form_action", url_for("add_expense"))
+    context.setdefault("submit_label", "Save expense")
     return (
         render_template(
             "add_expense.html",
@@ -390,6 +405,42 @@ def _render_expense_form(status=200, **context):
         ),
         status,
     )
+
+
+def _submitted_values(form):
+    """Return the raw submitted expense fields, to re-fill the form on error."""
+    return {
+        "amount_raw": form.get("amount", "").strip(),
+        "category": form.get("category", ""),
+        "date_raw": form.get("date", "").strip(),
+        "description": form.get("description", "").strip(),
+    }
+
+
+def _get_expense(conn, expense_id, user_id):
+    """Return the expense row if it exists and belongs to the user, else None."""
+    return conn.execute(
+        "SELECT id, amount, category, date, description FROM expenses "
+        "WHERE id = ? AND user_id = ?",
+        (expense_id, user_id),
+    ).fetchone()
+
+
+def _update_expense(conn, expense_id, user_id, clean):
+    """Update the user's expense; return True if a row was changed."""
+    cur = conn.execute(
+        "UPDATE expenses SET amount = ?, category = ?, date = ?, "
+        "description = ? WHERE id = ? AND user_id = ?",
+        (
+            clean["amount"],
+            clean["category"],
+            clean["date"],
+            clean["description"],
+            expense_id,
+            user_id,
+        ),
+    )
+    return cur.rowcount > 0
 
 
 @app.route("/expenses/add", methods=["GET", "POST"])
@@ -404,12 +455,7 @@ def add_expense():
     clean, error = _validate_expense_form(request.form)
     if error:
         return _render_expense_form(
-            400,
-            error=error,
-            amount_raw=request.form.get("amount", "").strip(),
-            category=request.form.get("category", ""),
-            date_raw=request.form.get("date", "").strip(),
-            description=request.form.get("description", "").strip(),
+            400, error=error, **_submitted_values(request.form)
         )
 
     conn = get_db()
@@ -436,9 +482,53 @@ def add_expense():
     return redirect(url_for("profile"))
 
 
-@app.route("/expenses/<int:id>/edit")
+@app.route("/expenses/<int:id>/edit", methods=["GET", "POST"])
 def edit_expense(id):
-    return "Edit expense — coming in Step 8"
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    form_context = {
+        "form_title": "Edit expense",
+        "form_subtitle": "Update this expense",
+        "form_action": url_for("edit_expense", id=id),
+        "submit_label": "Save changes",
+    }
+
+    conn = get_db()
+    try:
+        # Missing and other users' expenses both 404 so ids are not revealed.
+        expense = _get_expense(conn, id, user_id)
+        if expense is None:
+            abort(404)
+
+        if request.method == "GET":
+            return _render_expense_form(
+                amount_raw=expense["amount"],
+                category=expense["category"],
+                date_raw=expense["date"],
+                # A NULL description is shown as an empty field.
+                description=expense["description"] or "",
+                **form_context,
+            )
+
+        clean, error = _validate_expense_form(request.form)
+        if error:
+            return _render_expense_form(
+                400,
+                error=error,
+                **_submitted_values(request.form),
+                **form_context,
+            )
+
+        # Guards the race where the row is deleted after the lookup above.
+        if not _update_expense(conn, id, user_id, clean):
+            abort(404)
+        conn.commit()
+    finally:
+        conn.close()
+
+    return redirect(url_for("profile"))
 
 
 @app.route("/expenses/<int:id>/delete")
