@@ -4,7 +4,10 @@ from datetime import date
 
 from werkzeug.security import generate_password_hash
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "spendly.db")
+# DB_PATH can point at a mounted volume in production (e.g. /data/spendly.db).
+DB_PATH = os.environ.get("DB_PATH") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "spendly.db"
+)
 
 
 def get_db():
