@@ -531,9 +531,31 @@ def edit_expense(id):
     return redirect(url_for("profile"))
 
 
-@app.route("/expenses/<int:id>/delete")
+def _delete_expense(conn, expense_id, user_id):
+    """Delete the user's expense; return True if a row was removed."""
+    cur = conn.execute(
+        "DELETE FROM expenses WHERE id = ? AND user_id = ?",
+        (expense_id, user_id),
+    )
+    return cur.rowcount > 0
+
+
+@app.route("/expenses/<int:id>/delete", methods=["POST"])
 def delete_expense(id):
-    return "Delete expense — coming in Step 9"
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    conn = get_db()
+    try:
+        # Missing and other users' expenses both 404 so ids are not revealed.
+        if not _delete_expense(conn, id, user_id):
+            abort(404)
+        conn.commit()
+    finally:
+        conn.close()
+
+    return redirect(url_for("profile"))
 
 
 if __name__ == "__main__":
